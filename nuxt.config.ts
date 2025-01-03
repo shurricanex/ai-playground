@@ -6,6 +6,5 @@ export default defineNuxtConfig({
   runtimeConfig: {
     deepseekApiKey: process.env.DEEPSEEK_API_KEY
   },
-
   compatibilityDate: '2025-01-03'
 })

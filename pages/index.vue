@@ -246,8 +246,100 @@ const DEFAULT_CONFIG = {
 
 const fileInput = ref(null)
 const selectedFile = ref(null)
-const systemPrompt = ref('')
-const userPrompt = ref('')
+const systemPrompt = ref(`You are a document entity extraction specialist, receiving various waybills. Your objective is to:
+
+1. **Adhere to the JSON Schema**  
+  - The output **must** match the structure below exactly.  
+  - If an entity is missing or cannot be found in the document, set its value to `null` (or an appropriate default like `0` for numbers, `false` for booleans).
+
+2. **Extract Entities Only from the Document**  
+  - Do not invent values or rely on external knowledge.  
+  - Each extracted value must appear verbatim in the source document (except for minor formatting like trimming whitespace or converting dates).
+
+3. **Tabular Data Extraction**  
+  - Focus on the table (or tables) that list freight charges.  
+  - Each row can only have **one** of the following payment types: `"COLLECT"` or `"PREPAID"` value. 
+  - The waybill has a **single** `freight_payment_type` overall. If the waybill states `"COLLECT"`, only include line items marked or implied as **COLLECT**. If it states `"PREPAID"`, only include items marked or implied as **PREPAID**.  
+  - Exclude any rows or items that do **not** match the established `freight_payment_type`.  
+  - Here is a small example of how the columns might appear:
+example 1 in case the freight_payment_type is `"COLLECT"`: 
+
+CHARGE                                 CURRENCY              PREPAID               COLLECT
+---------------------------------------------------------------------------------------------------------------------
+THC ORIGIN                           VND                          100000.00         
+LUMSUM                                USD                                                         75.00
+
+expected output of example 1 :
+{
+item: "FUEL SURCHARGE",
+amount: " 75.00",
+currency: "USD"
+}
+
+
+
+example 2 in case the freight_payment_type is `"COLLECT"`: 
+
+|CODE    TARIFF ITEM      | FREIGHTED AS | RATE             | PREPAID             | COLLECT        |
+---------------------------------------------------------------------------------------------------------------------------------------------
+|OCEAN FREIGHT 1          |1/40GP              | 752.00           |                               |USD 752,00    |
+|THC ORIG TRML HAND  |1/40GP             | 5070000        | VND 5,707,000   |                         |
+
+
+expected output of example 2 :
+{
+item: "OCEAN FREIGHT 1",
+amount: " 752.00",
+currency: "USD"
+}
+If `freight_payment_type` is "COLLECT", then we only include the row "LUMSUM" with an amount of 75.00. The row for "FUEL SURCHARGE" is excluded because the COLLECT column is empty.
+- make sure to follow these steps in order to extract freight_rate_item thoroughly: 
+step 1: extract all row data with corresponding column name, if you found empty space replace it with null
+step 2: display it 
+step 3: filter out any row which has  value `null` no matter what column it is 
+step 4: map the remaining rows to expected schema for example 
+[{
+item: "LUMSUM",
+amount: " 752.00",
+currency: "USD"
+}]
+
+4. **Date Conversion**  
+  - Convert all dates to `YYYY/MM/dd` format.
+
+5. **Calculation**  
+  - `freight_charge_total` = the **sum** of amounts from `freight_rate_item` **that match** the `freight_payment_type`.  
+  - Provide **only** the final numeric result (no step-by-step math in the final JSON).`)
+const userPrompt = ref(`Given a sea waybill, your task is to extract the text values of the following entities, adhering strictly to the provided JSON schema:
+
+{
+ "bl_number": null,
+ "total_cartons": 0,
+ "container_size_type": null,
+ "hts_code": null,
+ "is_port_of_arrival_door": false,
+ "place_of_delivery": null,
+ "port_of_discharge": null,
+ "port_of_loading": null,
+ "freight_payment_type": null,
+ "freight_rate_item": [
+ {
+  "item_name": null,
+"amount":null,
+"currency":null
+ }
+ ]
+,
+ "container_number": [],
+"seal_number": [],
+ "service_contract_number": null,
+ "shipped_on_board_date": null,
+ "freight_charge_total": 0,
+ "freight_charge_currency": "",
+ "total_measurement": 0,
+ "total_shipment_weight": 0
+}
+- freight_charge_total is sum of collect amounts if freight_payment_type COLLECT, else if freight_payment_type is PREPAID then freight_charge_total is sum of prepaid amounts`)
 const result = ref('')
 const error = ref('')
 const loading = ref(false)
