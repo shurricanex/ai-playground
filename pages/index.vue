@@ -250,7 +250,7 @@ const systemPrompt = ref(`You are a document entity extraction specialist, recei
 
 1. **Adhere to the JSON Schema**  
   - The output **must** match the structure below exactly.  
-  - If an entity is missing or cannot be found in the document, set its value to `null` (or an appropriate default like `0` for numbers, `false` for booleans).
+  - If an entity is missing or cannot be found in the document, set its value to null (or an appropriate default like 0 for numbers, false for booleans).
 
 2. **Extract Entities Only from the Document**  
   - Do not invent values or rely on external knowledge.  
@@ -258,11 +258,11 @@ const systemPrompt = ref(`You are a document entity extraction specialist, recei
 
 3. **Tabular Data Extraction**  
   - Focus on the table (or tables) that list freight charges.  
-  - Each row can only have **one** of the following payment types: `"COLLECT"` or `"PREPAID"` value. 
-  - The waybill has a **single** `freight_payment_type` overall. If the waybill states `"COLLECT"`, only include line items marked or implied as **COLLECT**. If it states `"PREPAID"`, only include items marked or implied as **PREPAID**.  
-  - Exclude any rows or items that do **not** match the established `freight_payment_type`.  
+  - Each row can only have **one** of the following payment types: "COLLECT" or "PREPAID" value. 
+  - The waybill has a **single** freight_payment_type overall. If the waybill states "COLLECT", only include line items marked or implied as **COLLECT**. If it states "PREPAID", only include items marked or implied as **PREPAID**.  
+  - Exclude any rows or items that do **not** match the established freight_payment_type.  
   - Here is a small example of how the columns might appear:
-example 1 in case the freight_payment_type is `"COLLECT"`: 
+example 1 in case the freight_payment_type is "COLLECT": 
 
 CHARGE                                 CURRENCY              PREPAID               COLLECT
 ---------------------------------------------------------------------------------------------------------------------
@@ -278,7 +278,7 @@ currency: "USD"
 
 
 
-example 2 in case the freight_payment_type is `"COLLECT"`: 
+example 2 in case the freight_payment_type is "COLLECT": 
 
 |CODE    TARIFF ITEM      | FREIGHTED AS | RATE             | PREPAID             | COLLECT        |
 ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -292,11 +292,11 @@ item: "OCEAN FREIGHT 1",
 amount: " 752.00",
 currency: "USD"
 }
-If `freight_payment_type` is "COLLECT", then we only include the row "LUMSUM" with an amount of 75.00. The row for "FUEL SURCHARGE" is excluded because the COLLECT column is empty.
+If freight_payment_type is "COLLECT", then we only include the row "LUMSUM" with an amount of 75.00. The row for "FUEL SURCHARGE" is excluded because the COLLECT column is empty.
 - make sure to follow these steps in order to extract freight_rate_item thoroughly: 
 step 1: extract all row data with corresponding column name, if you found empty space replace it with null
 step 2: display it 
-step 3: filter out any row which has  value `null` no matter what column it is 
+step 3: filter out any row which has  value null no matter what column it is 
 step 4: map the remaining rows to expected schema for example 
 [{
 item: "LUMSUM",
@@ -305,10 +305,10 @@ currency: "USD"
 }]
 
 4. **Date Conversion**  
-  - Convert all dates to `YYYY/MM/dd` format.
+  - Convert all dates to YYYY/MM/dd format.
 
 5. **Calculation**  
-  - `freight_charge_total` = the **sum** of amounts from `freight_rate_item` **that match** the `freight_payment_type`.  
+  - freight_charge_total = the **sum** of amounts from freight_rate_item **that match** the freight_payment_type.  
   - Provide **only** the final numeric result (no step-by-step math in the final JSON).`)
 const userPrompt = ref(`Given a sea waybill, your task is to extract the text values of the following entities, adhering strictly to the provided JSON schema:
 
