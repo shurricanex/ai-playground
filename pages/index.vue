@@ -224,8 +224,34 @@
 
             <!-- Results Display -->
             <div v-if="result" class="space-y-4">
+              <div class="flex justify-between items-center mb-2">
+                <div class="flex items-center space-x-2">
+                  <button
+                    @click="displayMode = 'json'"
+                    class="px-3 py-1.5 text-sm rounded-md transition-colors"
+                    :class="displayMode === 'json' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'"
+                  >
+                    JSON
+                  </button>
+                  <button
+                    @click="displayMode = 'markdown'"
+                    class="px-3 py-1.5 text-sm rounded-md transition-colors"
+                    :class="displayMode === 'markdown' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'"
+                  >
+                    Markdown
+                  </button>
+                </div>
+                <div v-if="extractionDuration !== null" class="text-sm text-gray-500">
+                  Extracted in {{ extractionDuration.toFixed(2) }}s
+                </div>
+              </div>
               <div class="relative">
-                <pre class="bg-gray-50 p-3 sm:p-4 rounded-lg overflow-x-auto text-xs sm:text-sm whitespace-pre-wrap max-h-[60vh] xl:max-h-[calc(100vh-20rem)] overflow-y-auto">{{ formattedResult }}</pre>
+                <div v-if="displayMode === 'json'" class="bg-gray-50 p-3 sm:p-4 rounded-lg overflow-x-auto text-xs sm:text-sm whitespace-pre-wrap max-h-[60vh] xl:max-h-[calc(100vh-20rem)] overflow-y-auto">
+                  <pre>{{ formattedResult }}</pre>
+                </div>
+                <div v-else class="prose prose-sm max-w-none bg-gray-50 p-3 sm:p-4 rounded-lg overflow-x-auto max-h-[60vh] xl:max-h-[calc(100vh-20rem)] overflow-y-auto">
+                  <div v-html="markdownResult"></div>
+                </div>
                 <div class="absolute top-2 right-2 flex space-x-2">
                   <button
                     @click="copyResults"
@@ -244,14 +270,7 @@
                   >
                     <ArrowDownTrayIcon class="h-4 w-4" />
                   </button>
-                  <div v-if="extractCsvContent(result)" class="flex space-x-1">
-                    <button
-                      @click="downloadCsv"
-                      class="p-1.5 rounded-md bg-white/80 hover:bg-white shadow-sm border border-gray-200 text-gray-600 hover:text-gray-800 transition-colors"
-                      title="Download CSV"
-                    >
-                      <DocumentTextIcon class="h-4 w-4" />
-                    </button>
+                  <div class="flex space-x-1">
                     <button
                       @click="downloadExcel"
                       class="p-1.5 rounded-md bg-white/80 hover:bg-white shadow-sm border border-gray-200 text-gray-600 hover:text-gray-800 transition-colors group relative"
@@ -369,6 +388,9 @@ import {
 } from '@heroicons/vue/24/outline'
 import SpinnerIcon from '~/components/SpinnerIcon.vue'
 import * as XLSX from 'xlsx'
+import MarkdownIt from 'markdown-it'
+
+const md = new MarkdownIt()
 
 interface PDFFileMetadata {
   name: string;
@@ -376,6 +398,38 @@ interface PDFFileMetadata {
   lastModified: number;
   type: string;
   url?: string;
+}
+
+interface ContainerDetail {
+  container_number: string;
+  container_seal_number: string;
+  container_size_type: string;
+  carton_amount: number;
+}
+
+interface FreightRateItem {
+  item_name: string;
+  amount: string;
+  currency: string;
+}
+
+interface BillInfo {
+  bl_number: string;
+  total_cartons: number;
+  container_detail: ContainerDetail[];
+  hts_code: string;
+  is_port_of_arrival_door: boolean;
+  place_of_delivery: string;
+  port_of_discharge: string;
+  port_of_loading: string;
+  freight_payment_type: string;
+  freight_rate_item: FreightRateItem[];
+  service_contract_number: string;
+  shipped_on_board_date: string;
+  freight_charge_total: number;
+  freight_charge_currency: string;
+  total_measurement: number;
+  total_shipment_weight: number;
 }
 
 const DEFAULT_CONFIG = {
@@ -400,10 +454,11 @@ Here is a table with freight information. Each row belongs to a shipment, and th
 Table Example:
 
 ITEM 	                          PREPAID	             COLLECT
-LUMSUM                                                           USD 50.00
-OCEAN FREIGHT                                             USD 75.00
-LTHC                                VND 30.00
-DOC O/B DOC FEE        VND 60.00
+LUMSUM                                               USD 50.00
+OCEAN FREIGHT                                        USD 75.00
+LTHC                            VND 30.00
+DOC O/B DOC FEE                 VND 60.00
+
 result :
 [
  { "ITEM": "LUMSUM", "PREPAID": null, "COLLECT": "50.00", "CURRENCY": "USD" },
@@ -413,7 +468,7 @@ result :
 ]
 
 Instructions:
- 1.	Convert tabular data line items into markdown fill the blank cell with null  and display 
+1.	Convert tabular data line items into markdown fill the blank cell with null  and display 
 2.	Avoid Confusion: Do not misinterpret blank cells. Always associate each value with its correct column and do not mix up columns, even if there is an unusual pattern of blanks.
 3.	Output Format: Provide the extracted as  data as schema below
 {"ITEM": null, "PREPAID": null;, "COLLECT":null, "CURRENCY":null }
@@ -421,8 +476,44 @@ Instructions:
        validation1: Cross-check each value with its respective column to ensure accuracy, especially for rows with blank spaces
 	validation2: also make sure either PREPAID or COLLECT has value
        validation3: ensure strictly that not all PREPAID cells are null, and also not all COLLECT cells are null, that mean the PREPAID and COLLECT column must not be entirely null, if this fails then it mean you have mixed up column value 
-5.	Reasoning step by step, if you have struggle please explain and suggest the changes
-6. convert the result to csv and place in csv_result tag for example <csv_result> content </csv_result> `, // Your long default user prompt
+5. find the freight payment type which can be COLLECT or PREPAID, then use it to filter the results, for example the freight payment type is COLLECT then filter to include object which COLLECT is not null
+6. map the result into {"item", null, "amount": null, "currency":null}
+7. push the mapped results into freight_rate_item then extract other field values as follow schema 
+JSON schema:
+{
+ "bl_number": null,
+ "total_cartons": 0,
+"container_detail":[{
+"container_number": null,
+"container_seal_number": null,
+"container_size_type": null,
+"carton_amount":0,
+}
+]
+ "hts_code": null,
+ "is_port_of_arrival_door": false,
+ "place_of_delivery": null,
+ "port_of_discharge": null,
+ "port_of_loading": null,
+ "freight_payment_type": null,
+ "freight_rate_item": [
+ {
+ "item_name": null,
+"amount":null,
+"currency":null
+ }
+ ]
+,
+ "service_contract_number": null,
+ "shipped_on_board_date": null,
+ "freight_charge_total": 0,
+ "freight_charge_currency": "",
+ "total_measurement": 0,
+ "total_shipment_weight": 0
+}
+8. Reasoning step by step, if you have struggle please explain and suggest the changes
+
+`, // Your long default user prompt
 USER: `Please extract the information from the freight charge table in the document provided`
 }
 
@@ -465,6 +556,8 @@ const isUserPromptFocused = ref(false)
 const zoomLevel = ref(1)
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 3
+const displayMode = ref<'json' | 'markdown'>('json')
+const extractionDuration = ref<number | null>(null)
 
 const VuePdfEmbed = defineAsyncComponent(() => 
   import('vue-pdf-embed')
@@ -511,6 +604,58 @@ const formattedResult = computed(() => {
     return JSON.stringify(parsed, null, 2)
   } catch {
     return result.value
+  }
+})
+
+const markdownResult = computed(() => {
+  if (!result.value) return ''
+  try {
+    // Try to parse as JSON first
+    const parsed = JSON.parse(result.value)
+    // Convert JSON to markdown
+    let markdown = '# Bill Information\n\n'
+    
+    // Add main bill information
+    markdown += '## General Information\n\n'
+    markdown += `- **Bill of Lading Number:** ${parsed.bl_number || 'N/A'}\n`
+    markdown += `- **Total Cartons:** ${parsed.total_cartons || 'N/A'}\n`
+    markdown += `- **HTS Code:** ${parsed.hts_code || 'N/A'}\n`
+    markdown += `- **Place of Delivery:** ${parsed.place_of_delivery || 'N/A'}\n`
+    markdown += `- **Port of Discharge:** ${parsed.port_of_discharge || 'N/A'}\n`
+    markdown += `- **Port of Loading:** ${parsed.port_of_loading || 'N/A'}\n`
+    markdown += `- **Freight Payment Type:** ${parsed.freight_payment_type || 'N/A'}\n`
+    markdown += `- **Service Contract Number:** ${parsed.service_contract_number || 'N/A'}\n`
+    markdown += `- **Shipped on Board Date:** ${parsed.shipped_on_board_date || 'N/A'}\n`
+    markdown += `- **Total Measurement:** ${parsed.total_measurement || 'N/A'}\n`
+    markdown += `- **Total Shipment Weight:** ${parsed.total_shipment_weight || 'N/A'}\n\n`
+
+    // Add container details
+    if (parsed.container_detail && parsed.container_detail.length > 0) {
+      markdown += '## Container Details\n\n'
+      parsed.container_detail.forEach((container: any, index: number) => {
+        markdown += `### Container ${index + 1}\n\n`
+        markdown += `- **Container Number:** ${container.container_number || 'N/A'}\n`
+        markdown += `- **Seal Number:** ${container.container_seal_number || 'N/A'}\n`
+        markdown += `- **Size/Type:** ${container.container_size_type || 'N/A'}\n`
+        markdown += `- **Carton Amount:** ${container.carton_amount || 'N/A'}\n\n`
+      })
+    }
+
+    // Add freight rate items
+    if (parsed.freight_rate_item && parsed.freight_rate_item.length > 0) {
+      markdown += '## Freight Rate Items\n\n'
+      markdown += '| Item Name | Amount | Currency |\n'
+      markdown += '|-----------|---------|----------|\n'
+      parsed.freight_rate_item.forEach((item: any) => {
+        markdown += `| ${item.item_name || 'N/A'} | ${item.amount || 'N/A'} | ${item.currency || 'N/A'} |\n`
+      })
+      markdown += '\n'
+    }
+
+    return md.render(markdown)
+  } catch {
+    // If not valid JSON, render the raw text as markdown
+    return md.render(result.value)
   }
 })
 
@@ -576,6 +721,7 @@ const handleFileDrop = (event: DragEvent) => {
       name: file.name,
       size: file.size,
       lastModified: file.lastModified,
+      type: file.type,
       url: fileUrl
     };
     
@@ -593,6 +739,8 @@ const submitForm = async () => {
   loading.value = true
   error.value = ''
   result.value = ''
+  extractionDuration.value = null
+  const startTime = performance.now()
 
   try {
     const formData = new FormData()
@@ -621,6 +769,7 @@ const submitForm = async () => {
 
     const data = await response.json()
     result.value = data.result
+    extractionDuration.value = (performance.now() - startTime) / 1000 // Convert to seconds
   } catch (err: any) {
     error.value = err?.message || 'An error occurred'
   } finally {
@@ -772,93 +921,148 @@ const cleanupFileUrl = () => {
   }
 }
 
-// Add this function to extract CSV from the result
-const extractCsvContent = (text: string | null): string | null => {
-  if (!text) return null;
-  
+// Add function to extract JSON from result text
+const extractJsonFromResult = (text: string): string | null => {
   try {
-    // Look for content between <csv_result> tags
-    const csvMatch = text.match(/<csv_result>([\s\S]*?)<\/csv_result>/);
-    if (!csvMatch || !csvMatch[1]) return null;
-
-    // Get the content and trim whitespace
-    const csvContent = csvMatch[1].trim();
-    if (!csvContent) return null;
-
-    return csvContent;
+    // Look for content between ```json and ``` tags
+    const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/)
+    if (jsonMatch && jsonMatch[1]) {
+      return jsonMatch[1].trim()
+    }
+    
+    // If no json tags found, try to find any JSON object in the text
+    const matches = text.match(/\{[\s\S]*\}/)
+    if (matches) {
+      return matches[0]
+    }
+    
+    return null
   } catch {
-    return null;
+    return null
   }
 }
 
-// Add download CSV function
-const downloadCsv = () => {
-  if (!result.value) return;
-  
-  const csvContent = extractCsvContent(result.value);
-  if (!csvContent) {
-    error.value = 'No valid CSV content found between <csv> tags';
-    return;
-  }
-
+// Update jsonToExcel function to avoid repeating BL number
+const jsonToExcel = (jsonData: string): Uint8Array => {
   try {
-    const blob = new Blob([csvContent], { 
-      type: 'text/csv;charset=utf-8;'
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `bill-info-${new Date().toISOString()}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // Extract JSON from the result text
+    const extractedJson = extractJsonFromResult(jsonData)
+    if (!extractedJson) {
+      throw new Error('No valid JSON found in the result')
+    }
+
+    const data: BillInfo = JSON.parse(extractedJson)
+    const wb = XLSX.utils.book_new()
+
+    // Define all possible columns
+    const headers = [
+      'Bill of Lading Number', 'Total Cartons', 'HTS Code', 'Place of Delivery',
+      'Port of Discharge', 'Port of Loading', 'Freight Payment Type',
+      'Service Contract Number', 'Shipped on Board Date', 'Freight Charge Total',
+      'Freight Charge Currency', 'Total Measurement', 'Total Shipment Weight',
+      'Container Number', 'Container Seal Number', 'Container Size Type', 'Container Carton Amount',
+      'Freight Item Name', 'Freight Amount', 'Freight Currency'
+    ]
+
+    // Create rows array starting with headers
+    const rows = [headers]
+
+    // Add main row with general information
+    const mainRow = [
+      data.bl_number,
+      data.total_cartons.toString(),
+      data.hts_code,
+      data.place_of_delivery,
+      data.port_of_discharge,
+      data.port_of_loading,
+      data.freight_payment_type,
+      data.service_contract_number,
+      data.shipped_on_board_date,
+      data.freight_charge_total.toString(),
+      data.freight_charge_currency,
+      data.total_measurement.toString(),
+      data.total_shipment_weight.toString(),
+      '', '', '', '', '', '', '' // Empty cells for container and freight details
+    ]
+    rows.push(mainRow)
+
+    // Add container details rows
+    if (data.container_detail && data.container_detail.length > 0) {
+      data.container_detail.forEach(container => {
+        rows.push([
+          '', // Empty cell for BL number
+          '', '', '', '', '', '', '', '', '', '', '', '', // Empty cells for general info
+          container.container_number,
+          container.container_seal_number,
+          container.container_size_type,
+          container.carton_amount.toString(),
+          '', '', '' // Empty cells for freight details
+        ])
+      })
+    }
+
+    // Add freight rate rows
+    if (data.freight_rate_item && data.freight_rate_item.length > 0) {
+      data.freight_rate_item.forEach(item => {
+        rows.push([
+          '', // Empty cell for BL number
+          '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', // Empty cells for general info and container details
+          item.item_name,
+          item.amount,
+          item.currency
+        ])
+      })
+    }
+
+    // Create worksheet
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    
+    // Calculate column widths based on content
+    const colWidths = headers.map((header, index) => {
+      // Start with header width
+      let maxWidth = header.length
+
+      // Check all rows for this column
+      rows.forEach(row => {
+        const cellContent = row[index]?.toString() || ''
+        maxWidth = Math.max(maxWidth, cellContent.length)
+      })
+
+      // Add some padding and convert to character width
+      return { wch: maxWidth + 2 }
+    })
+    
+    ws['!cols'] = colWidths
+
+    // Add worksheet to workbook
+    XLSX.utils.book_append_sheet(wb, ws, 'Bill Information')
+
+    return XLSX.write(wb, { type: 'array', bookType: 'xlsx' })
   } catch (err) {
-    error.value = 'Failed to download CSV file';
+    console.error('Error converting JSON to Excel:', err)
+    throw new Error('Failed to convert JSON to Excel')
   }
 }
 
-// Add new function to convert CSV to Excel
-const csvToExcel = (csvContent: string): Uint8Array => {
-  // Split CSV into rows
-  const rows = csvContent.split('\n').map(row => row.split(','))
-  
-  // Create workbook and worksheet
-  const wb = XLSX.utils.book_new()
-  const ws = XLSX.utils.aoa_to_sheet(rows)
-  
-  // Add worksheet to workbook
-  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
-  
-  // Generate Excel file
-  return XLSX.write(wb, { type: 'array', bookType: 'xlsx' })
-}
-
-// Add download Excel function
+// Update download Excel function
 const downloadExcel = () => {
-  if (!result.value) return;
-  
-  const csvContent = extractCsvContent(result.value);
-  if (!csvContent) {
-    error.value = 'No valid CSV content found between <csv> tags';
-    return;
-  }
+  if (!result.value) return
 
   try {
-    const excelBuffer = csvToExcel(csvContent);
+    const excelBuffer = jsonToExcel(result.value)
     const blob = new Blob([excelBuffer], { 
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `bill-info-${new Date().toISOString()}.xlsx`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `bill-info-${new Date().toISOString()}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   } catch (err) {
-    error.value = 'Failed to download Excel file';
+    error.value = 'Failed to download Excel file'
   }
 }
 </script>
@@ -897,5 +1101,50 @@ textarea {
     width: 4px;
     height: 4px;
   }
+}
+
+/* Markdown content styles */
+.prose {
+  @apply text-gray-800;
+}
+
+.prose h1 {
+  @apply text-2xl font-bold text-gray-900 mb-6;
+}
+
+.prose h2 {
+  @apply text-xl font-semibold text-gray-800 mt-8 mb-4;
+}
+
+.prose h3 {
+  @apply text-lg font-medium text-gray-800 mt-6 mb-3;
+}
+
+.prose table {
+  @apply w-full border-collapse my-4;
+}
+
+.prose table th {
+  @apply bg-gray-100 text-left p-2 border border-gray-300;
+}
+
+.prose table td {
+  @apply p-2 border border-gray-300;
+}
+
+.prose ul {
+  @apply list-disc list-inside;
+}
+
+.prose li {
+  @apply my-1;
+}
+
+.prose strong {
+  @apply text-gray-900;
+}
+
+.prose p {
+  @apply my-2;
 }
 </style> 
