@@ -1,6 +1,6 @@
 <template>
   <div class="min-h-screen bg-gray-50 py-4 sm:py-8">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="max-w-[1500px] mx-auto px-4 sm:px-6 lg:px-8">
       <h1 class="text-2xl sm:text-3xl font-bold text-gray-900 mb-6 sm:mb-8">PDF Bill Information Extractor</h1>
       
       <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6">
@@ -34,10 +34,100 @@
               <div v-else class="space-y-2">
                 <DocumentTextIcon class="mx-auto h-10 w-10 sm:h-12 sm:w-12 text-blue-500" />
                 <div>
-                  <p class="text-sm sm:text-base text-gray-900 font-medium">{{ selectedFile.name }}</p>
+                  <div class="flex items-center justify-center space-x-2">
+                    <p class="text-sm sm:text-base text-gray-900 font-medium">{{ selectedFile.name }}</p>
+                    <button
+                      @click="cleanupFileUrl"
+                      class="text-gray-400 hover:text-red-500 transition-colors"
+                      title="Remove file"
+                    >
+                      <XMarkIcon class="h-4 w-4" />
+                    </button>
+                  </div>
                   <p class="text-xs sm:text-sm text-gray-500">
                     {{ formatFileSize(selectedFile.size) }}
                   </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- PDF Preview Section -->
+          <div v-if="selectedFile" class="bg-white rounded-xl shadow-sm p-4 sm:p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-lg sm:text-xl font-semibold text-gray-800">Document Preview</h2>
+              <button
+                @click="togglePdfView"
+                class="text-sm text-blue-600 hover:text-blue-800 flex items-center space-x-1"
+              >
+                <component 
+                  :is="showPdf ? 'EyeSlashIcon' : 'EyeIcon'"
+                  class="h-4 w-4"
+                />
+                <span>{{ showPdf ? 'Hide Preview' : 'Show Preview' }}</span>
+              </button>
+            </div>
+            
+            <div v-if="showPdf" class="border rounded-lg">
+              <div class="relative bg-gray-100 rounded-lg group" style="height: 600px;">
+                <div class="absolute top-4 right-4 flex items-center space-x-2 bg-white/90 px-3 py-1.5 rounded-full shadow-sm border transition-opacity duration-200 opacity-0 group-hover:opacity-100">
+                  <button
+                    @click="zoomOut"
+                    :disabled="zoomLevel <= MIN_ZOOM"
+                    class="p-1 text-gray-600 hover:text-gray-900 disabled:text-gray-400"
+                    title="Zoom out"
+                  >
+                    <MinusIcon class="h-4 w-4" />
+                  </button>
+                  <button
+                    @click="resetZoom"
+                    class="px-2 py-0.5 text-xs text-gray-600 hover:text-gray-900"
+                    title="Reset zoom"
+                  >
+                    {{ Math.round(zoomLevel * 100) }}%
+                  </button>
+                  <button
+                    @click="zoomIn"
+                    :disabled="zoomLevel >= MAX_ZOOM"
+                    class="p-1 text-gray-600 hover:text-gray-900 disabled:text-gray-400"
+                    title="Zoom in"
+                  >
+                    <PlusIcon class="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div class="h-full overflow-auto">
+                  <div :style="`transform: scale(${zoomLevel}); transform-origin: top left; transition: transform 0.2s`">
+                    <ClientOnly>
+                      <VuePdfEmbed
+                        v-if="pdfUrl"
+                        :source="pdfUrl"
+                        :page="currentPage"
+                        class="rounded-lg"
+                      />
+                    </ClientOnly>
+                  </div>
+                </div>
+
+                <div 
+                  class="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex items-center space-x-2 bg-white/90 px-3 py-1.5 rounded-full shadow-sm border transition-opacity duration-200 opacity-0 group-hover:opacity-100"
+                >
+                  <button
+                    @click="currentPage > 1 && currentPage--"
+                    :disabled="currentPage <= 1"
+                    class="p-1 text-gray-600 hover:text-gray-900 disabled:text-gray-400"
+                  >
+                    <ChevronLeftIcon class="h-5 w-5" />
+                  </button>
+                  <span class="text-sm text-gray-600 min-w-[4rem] text-center">
+                    Page {{ currentPage }}
+                  </span>
+                  <button
+                    @click="currentPage++"
+                    class="p-1 text-gray-600 hover:text-gray-900"
+                  >
+                    <ChevronRightIcon class="h-5 w-5" />
+                  </button>
                 </div>
               </div>
             </div>
@@ -51,13 +141,25 @@
             <div class="mb-4">
               <div class="flex items-center justify-between mb-2">
                 <label class="text-sm font-medium text-gray-700">System Prompt</label>
-                <span class="text-xs text-gray-400">(Optional)</span>
+                <div class="flex items-center space-x-2">
+                  <span class="text-xs text-gray-400">(Optional)</span>
+                  <button
+                    @click="resetPrompts"
+                    class="text-xs text-blue-600 hover:text-blue-800"
+                    title="Reset prompts to default"
+                  >
+                    Reset to Default
+                  </button>
+                </div>
               </div>
               <textarea
                 v-model="systemPrompt"
-                rows="4"
-                class="w-full p-3 border border-gray-300 rounded-lg font-mono text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                :rows="isSystemPromptFocused ? 20 : 4"
+                class="w-full p-3 border border-gray-300 rounded-lg font-mono text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-300"
+                :class="{ 'max-h-[500px] overflow-y-auto': isSystemPromptFocused }"
                 placeholder="Enter system instructions..."
+                @focus="isSystemPromptFocused = true"
+                @blur="isSystemPromptFocused = false"
               ></textarea>
             </div>
 
@@ -69,9 +171,12 @@
               </div>
               <textarea
                 v-model="userPrompt"
-                rows="4"
-                class="w-full p-3 border border-gray-300 rounded-lg font-mono text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                :rows="isUserPromptFocused ? 20 : 4"
+                class="w-full p-3 border border-gray-300 rounded-lg font-mono text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-300"
+                :class="{ 'max-h-[500px] overflow-y-auto': isUserPromptFocused }"
                 placeholder="Enter extraction requirements..."
+                @focus="isUserPromptFocused = true"
+                @blur="isUserPromptFocused = false"
               ></textarea>
             </div>
 
@@ -135,10 +240,29 @@
                   <button
                     @click="downloadResults"
                     class="p-1.5 rounded-md bg-white/80 hover:bg-white shadow-sm border border-gray-200 text-gray-600 hover:text-gray-800 transition-colors"
-                    title="Download results"
+                    title="Download JSON"
                   >
                     <ArrowDownTrayIcon class="h-4 w-4" />
                   </button>
+                  <div v-if="extractCsvContent(result)" class="flex space-x-1">
+                    <button
+                      @click="downloadCsv"
+                      class="p-1.5 rounded-md bg-white/80 hover:bg-white shadow-sm border border-gray-200 text-gray-600 hover:text-gray-800 transition-colors"
+                      title="Download CSV"
+                    >
+                      <DocumentTextIcon class="h-4 w-4" />
+                    </button>
+                    <button
+                      @click="downloadExcel"
+                      class="p-1.5 rounded-md bg-white/80 hover:bg-white shadow-sm border border-gray-200 text-gray-600 hover:text-gray-800 transition-colors group relative"
+                      title="Download Excel"
+                    >
+                      <TableCellsIcon class="h-4 w-4" />
+                      <span class="absolute bottom-full mb-1 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                        Download Excel
+                      </span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -207,8 +331,9 @@
           <button
             @click="resetConfig"
             class="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900"
+            title="Reset configuration to default values"
           >
-            Reset to Default
+            Reset Config
           </button>
           <button
             @click="saveConfig"
@@ -222,8 +347,8 @@
   </Teleport>
 </template>
 
-<script setup>
-import { ref, computed } from 'vue'
+<script setup lang="ts">
+import { ref, computed, onUnmounted, defineAsyncComponent, onMounted, watch } from 'vue'
 import { 
   DocumentIcon, 
   DocumentTextIcon, 
@@ -233,9 +358,25 @@ import {
   CheckIcon,
   MagnifyingGlassIcon,
   Cog6ToothIcon,
-  XMarkIcon
+  XMarkIcon,
+  EyeIcon,
+  EyeSlashIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  PlusIcon,
+  MinusIcon,
+  TableCellsIcon
 } from '@heroicons/vue/24/outline'
 import SpinnerIcon from '~/components/SpinnerIcon.vue'
+import * as XLSX from 'xlsx'
+
+interface PDFFileMetadata {
+  name: string;
+  size: number;
+  lastModified: number;
+  type: string;
+  url?: string;
+}
 
 const DEFAULT_CONFIG = {
   temperature: 0,
@@ -244,110 +385,90 @@ const DEFAULT_CONFIG = {
   presence_penalty: null,
   frequency_penalty: null}
 
+const STORAGE_KEYS = {
+  SYSTEM_PROMPT: 'bill-extractor-system-prompt',
+  USER_PROMPT: 'bill-extractor-user-prompt',
+  API_CONFIG: 'bill-extractor-api-config',
+  PDF_FILE: 'bill-extractor-pdf-file'
+}
+
+const DEFAULT_PROMPTS = {
+  SYSTEM: `You are an advanced document reasoning assistant. Your task is to extract and analyze data from complex tables accurately, even when they contain blank spaces, ambiguous formatting, or overlapping information. Focus on correctly associating values with their respective columns.
+
+Here is a table with freight information. Each row belongs to a shipment, and the columns are PREPAID (amount prepaid by the sender) and COLLECT (amount to be collected from the receiver). If a cell under a column is blank, it means the value does not exist for that column for that shipment.
+
+Table Example:
+
+ITEM 	                          PREPAID	             COLLECT
+LUMSUM                                                           USD 50.00
+OCEAN FREIGHT                                             USD 75.00
+LTHC                                VND 30.00
+DOC O/B DOC FEE        VND 60.00
+result :
+[
+ { "ITEM": "LUMSUM", "PREPAID": null, "COLLECT": "50.00", "CURRENCY": "USD" },
+ { "ITEM": "OCEAN FREIGHT", "PREPAID": null, "COLLECT": "75.00",  "CURRENCY": "USD"},
+ { "ITEM": "LTHC", "PREPAID": "30.00", "COLLECT": null, "CURRENCY": "VND"},
+ { "ITE ID": "DOC O/B DOC FEE", "PREPAID": "60.00", "COLLECT": null, "CURRENCY":"VND"}
+]
+
+Instructions:
+ 1.	Convert tabular data line items into markdown fill the blank cell with null  and display 
+2.	Avoid Confusion: Do not misinterpret blank cells. Always associate each value with its correct column and do not mix up columns, even if there is an unusual pattern of blanks.
+3.	Output Format: Provide the extracted as  data as schema below
+{"ITEM": null, "PREPAID": null;, "COLLECT":null, "CURRENCY":null }
+4.	Validation: 
+       validation1: Cross-check each value with its respective column to ensure accuracy, especially for rows with blank spaces
+	validation2: also make sure either PREPAID or COLLECT has value
+       validation3: ensure strictly that not all PREPAID cells are null, and also not all COLLECT cells are null, that mean the PREPAID and COLLECT column must not be entirely null, if this fails then it mean you have mixed up column value 
+5.	Reasoning step by step, if you have struggle please explain and suggest the changes
+6. convert the result to csv and place in csv_result tag for example <csv_result> content </csv_result> `, // Your long default user prompt
+USER: `Please extract the information from the freight charge table in the document provided`
+}
+
+const useLocalStorage = () => {
+  const getItem = (key: string, defaultValue: any = null) => {
+    if (process.client) {
+      return localStorage.getItem(key) ?? defaultValue
+    }
+    return defaultValue
+  }
+
+  const setItem = (key: string, value: string) => {
+    if (process.client) {
+      localStorage.setItem(key, value)
+    }
+  }
+
+  return { getItem, setItem }
+}
+
+const { getItem, setItem } = useLocalStorage()
+
 const fileInput = ref(null)
-const selectedFile = ref(null)
-const systemPrompt = ref(`You are a document entity extraction specialist, receiving various waybills. Your objective is to:
-
-1. **Adhere to the JSON Schema**  
-  - The output **must** match the structure below exactly.  
-  - If an entity is missing or cannot be found in the document, set its value to null (or an appropriate default like 0 for numbers, false for booleans).
-
-2. **Extract Entities Only from the Document**  
-  - Do not invent values or rely on external knowledge.  
-  - Each extracted value must appear verbatim in the source document (except for minor formatting like trimming whitespace or converting dates).
-
-3. **Tabular Data Extraction**  
-  - Focus on the table (or tables) that list freight charges.  
-  - Each row can only have **one** of the following payment types: "COLLECT" or "PREPAID" value. 
-  - The waybill has a **single** freight_payment_type overall. If the waybill states "COLLECT", only include line items marked or implied as **COLLECT**. If it states "PREPAID", only include items marked or implied as **PREPAID**.  
-  - Exclude any rows or items that do **not** match the established freight_payment_type.  
-  - Here is a small example of how the columns might appear:
-example 1 in case the freight_payment_type is "COLLECT": 
-
-CHARGE                                 CURRENCY              PREPAID               COLLECT
----------------------------------------------------------------------------------------------------------------------
-THC ORIGIN                           VND                          100000.00         
-LUMSUM                                USD                                                         75.00
-
-expected output of example 1 :
-{
-item: "FUEL SURCHARGE",
-amount: " 75.00",
-currency: "USD"
-}
-
-
-
-example 2 in case the freight_payment_type is "COLLECT": 
-
-|CODE    TARIFF ITEM      | FREIGHTED AS | RATE             | PREPAID             | COLLECT        |
----------------------------------------------------------------------------------------------------------------------------------------------
-|OCEAN FREIGHT 1          |1/40GP              | 752.00           |                               |USD 752,00    |
-|THC ORIG TRML HAND  |1/40GP             | 5070000        | VND 5,707,000   |                         |
-
-
-expected output of example 2 :
-{
-item: "OCEAN FREIGHT 1",
-amount: " 752.00",
-currency: "USD"
-}
-If freight_payment_type is "COLLECT", then we only include the row "LUMSUM" with an amount of 75.00. The row for "FUEL SURCHARGE" is excluded because the COLLECT column is empty.
-- make sure to follow these steps in order to extract freight_rate_item thoroughly: 
-step 1: extract all row data with corresponding column name, if you found empty space replace it with null
-step 2: display it 
-step 3: filter out any row which has  value null no matter what column it is 
-step 4: map the remaining rows to expected schema for example 
-[{
-item: "LUMSUM",
-amount: " 752.00",
-currency: "USD"
-}]
-
-4. **Date Conversion**  
-  - Convert all dates to YYYY/MM/dd format.
-
-5. **Calculation**  
-  - freight_charge_total = the **sum** of amounts from freight_rate_item **that match** the freight_payment_type.  
-  - Provide **only** the final numeric result (no step-by-step math in the final JSON).`)
-const userPrompt = ref(`Given a sea waybill, your task is to extract the text values of the following entities, adhering strictly to the provided JSON schema:
-
-{
- "bl_number": null,
- "total_cartons": 0,
- "container_size_type": null,
- "hts_code": null,
- "is_port_of_arrival_door": false,
- "place_of_delivery": null,
- "port_of_discharge": null,
- "port_of_loading": null,
- "freight_payment_type": null,
- "freight_rate_item": [
- {
-  "item_name": null,
-"amount":null,
-"currency":null
- }
- ]
-,
- "container_number": [],
-"seal_number": [],
- "service_contract_number": null,
- "shipped_on_board_date": null,
- "freight_charge_total": 0,
- "freight_charge_currency": "",
- "total_measurement": 0,
- "total_shipment_weight": 0
-}
-- freight_charge_total is sum of collect amounts if freight_payment_type COLLECT, else if freight_payment_type is PREPAID then freight_charge_total is sum of prepaid amounts`)
+const selectedFile = ref<File | null>(null)
+const systemPrompt = ref(DEFAULT_PROMPTS.SYSTEM)
+const userPrompt = ref(DEFAULT_PROMPTS.USER)
 const result = ref('')
 const error = ref('')
 const loading = ref(false)
 const copied = ref(false)
 const showConfig = ref(false)
 const configText = ref(JSON.stringify(DEFAULT_CONFIG, null, 2))
-const apiConfig = ref({ ...DEFAULT_CONFIG })
+const apiConfig = ref(DEFAULT_CONFIG)
 const configError = ref('')
+const showPdf = ref(true)
+const currentPage = ref(1)
+const pdfUrl = ref<string | null>(null)
+const isSystemPromptFocused = ref(false)
+const isUserPromptFocused = ref(false)
+const zoomLevel = ref(1)
+const MIN_ZOOM = 0.5
+const MAX_ZOOM = 3
+
+const VuePdfEmbed = defineAsyncComponent(() => 
+  import('vue-pdf-embed')
+)
 
 const configPlaceholder = computed(() => {
   return `// Sample Configurations:
@@ -393,7 +514,7 @@ const formattedResult = computed(() => {
   }
 })
 
-const formatFileSize = (bytes) => {
+const formatFileSize = (bytes: number): string => {
   if (bytes === 0) return '0 Bytes'
   const k = 1024
   const sizes = ['Bytes', 'KB', 'MB', 'GB']
@@ -401,25 +522,68 @@ const formatFileSize = (bytes) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
-const handleFileChange = (event) => {
-  const file = event.target.files?.[0]
+const handleFileChange = (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  
   if (file?.type === 'application/pdf') {
-    selectedFile.value = file
-    error.value = ''
-    result.value = ''
+    selectedFile.value = file;
+    error.value = '';
+    result.value = '';
+    currentPage.value = 1;
+    
+    if (pdfUrl.value) {
+      URL.revokeObjectURL(pdfUrl.value);
+    }
+    
+    const fileUrl = URL.createObjectURL(file);
+    pdfUrl.value = fileUrl;
+    
+    // Save file metadata to localStorage
+    const fileMetadata: PDFFileMetadata = {
+      name: file.name,
+      size: file.size,
+      lastModified: file.lastModified,
+      type: file.type
+    };
+    
+    if (process.client) {
+      setItem(STORAGE_KEYS.PDF_FILE, JSON.stringify(fileMetadata));
+    }
   } else {
-    error.value = 'Please select a PDF file'
+    error.value = 'Please select a PDF file';
   }
 }
 
-const handleFileDrop = (event) => {
-  const file = event.dataTransfer?.files[0]
+const handleFileDrop = (event: DragEvent) => {
+  const file = event.dataTransfer?.files[0];
+  
   if (file?.type === 'application/pdf') {
-    selectedFile.value = file
-    error.value = ''
-    result.value = ''
+    selectedFile.value = file;
+    error.value = '';
+    result.value = '';
+    currentPage.value = 1;
+    
+    if (pdfUrl.value) {
+      URL.revokeObjectURL(pdfUrl.value);
+    }
+    
+    const fileUrl = URL.createObjectURL(file);
+    pdfUrl.value = fileUrl;
+    
+    // Save file metadata to localStorage
+    const fileMetadata: PDFFileMetadata = {
+      name: file.name,
+      size: file.size,
+      lastModified: file.lastModified,
+      url: fileUrl
+    };
+    
+    if (process.client) {
+      setItem(STORAGE_KEYS.PDF_FILE, JSON.stringify(fileMetadata));
+    }
   } else {
-    error.value = 'Please drop a PDF file'
+    error.value = 'Please drop a PDF file';
   }
 }
 
@@ -437,7 +601,7 @@ const submitForm = async () => {
     formData.append('userPrompt', userPrompt.value)
 
     const cleanConfig = Object.entries(apiConfig.value)
-      .reduce((acc, [key, value]) => {
+      .reduce<Record<string, any>>((acc, [key, value]) => {
         if (value !== null) {
           acc[key] = value
         }
@@ -457,8 +621,8 @@ const submitForm = async () => {
 
     const data = await response.json()
     result.value = data.result
-  } catch (err) {
-    error.value = err.message || 'An error occurred'
+  } catch (err: any) {
+    error.value = err?.message || 'An error occurred'
   } finally {
     loading.value = false
   }
@@ -496,6 +660,7 @@ const resetConfig = () => {
   apiConfig.value = { ...DEFAULT_CONFIG }
   configText.value = JSON.stringify(DEFAULT_CONFIG, null, 2)
   configError.value = ''
+  setItem(STORAGE_KEYS.API_CONFIG, JSON.stringify(DEFAULT_CONFIG))
 }
 
 const saveConfig = () => {
@@ -507,6 +672,193 @@ const saveConfig = () => {
     configError.value = ''
   } catch (err) {
     configError.value = 'Invalid JSON format'
+  }
+}
+
+const togglePdfView = () => {
+  showPdf.value = !showPdf.value
+}
+
+const resetPrompts = () => {
+  const confirmReset = window.confirm('Are you sure you want to reset prompts to default values?')
+  if (confirmReset) {
+    systemPrompt.value = DEFAULT_PROMPTS.SYSTEM
+    userPrompt.value = DEFAULT_PROMPTS.USER
+    setItem(STORAGE_KEYS.SYSTEM_PROMPT, DEFAULT_PROMPTS.SYSTEM)
+    setItem(STORAGE_KEYS.USER_PROMPT, DEFAULT_PROMPTS.USER)
+  }
+}
+
+const zoomIn = () => {
+  if (zoomLevel.value < MAX_ZOOM) {
+    zoomLevel.value = Math.min(zoomLevel.value + 0.25, MAX_ZOOM)
+  }
+}
+
+const zoomOut = () => {
+  if (zoomLevel.value > MIN_ZOOM) {
+    zoomLevel.value = Math.max(zoomLevel.value - 0.25, MIN_ZOOM)
+  }
+}
+
+const resetZoom = () => {
+  zoomLevel.value = 1
+}
+
+watch(systemPrompt, (newValue) => {
+  setItem(STORAGE_KEYS.SYSTEM_PROMPT, newValue)
+}, { deep: true })
+
+watch(userPrompt, (newValue) => {
+  setItem(STORAGE_KEYS.USER_PROMPT, newValue)
+}, { deep: true })
+
+watch(apiConfig, (newValue) => {
+  setItem(STORAGE_KEYS.API_CONFIG, JSON.stringify(newValue))
+}, { deep: true })
+
+onMounted(() => {
+  // Initialize config from localStorage
+  const savedConfig = getItem(STORAGE_KEYS.API_CONFIG)
+  if (savedConfig) {
+    try {
+      const parsed = JSON.parse(savedConfig)
+      apiConfig.value = parsed
+      configText.value = JSON.stringify(parsed, null, 2)
+    } catch {
+      apiConfig.value = DEFAULT_CONFIG
+      configText.value = JSON.stringify(DEFAULT_CONFIG, null, 2)
+    }
+  }
+
+  // Initialize prompts from localStorage
+  const savedSystemPrompt = getItem(STORAGE_KEYS.SYSTEM_PROMPT)
+  const savedUserPrompt = getItem(STORAGE_KEYS.USER_PROMPT)
+  
+  if (savedSystemPrompt) {
+    systemPrompt.value = savedSystemPrompt
+  }
+  if (savedUserPrompt) {
+    userPrompt.value = savedUserPrompt
+  }
+
+  // Remove PDF restoration from localStorage since we can't restore the actual file
+  const savedFile = getItem(STORAGE_KEYS.PDF_FILE);
+  if (savedFile) {
+    try {
+      // Just clear the saved file data since we can't restore the actual file
+      localStorage.removeItem(STORAGE_KEYS.PDF_FILE);
+    } catch {
+      // Ignore errors
+    }
+  }
+})
+
+onUnmounted(() => {
+  cleanupFileUrl();
+})
+
+// Add a clear file button in the template
+
+// Add cleanup function for file URL
+const cleanupFileUrl = () => {
+  if (pdfUrl.value) {
+    URL.revokeObjectURL(pdfUrl.value);
+    pdfUrl.value = null;
+  }
+  selectedFile.value = null;
+  if (process.client) {
+    localStorage.removeItem(STORAGE_KEYS.PDF_FILE);
+  }
+}
+
+// Add this function to extract CSV from the result
+const extractCsvContent = (text: string | null): string | null => {
+  if (!text) return null;
+  
+  try {
+    // Look for content between <csv_result> tags
+    const csvMatch = text.match(/<csv_result>([\s\S]*?)<\/csv_result>/);
+    if (!csvMatch || !csvMatch[1]) return null;
+
+    // Get the content and trim whitespace
+    const csvContent = csvMatch[1].trim();
+    if (!csvContent) return null;
+
+    return csvContent;
+  } catch {
+    return null;
+  }
+}
+
+// Add download CSV function
+const downloadCsv = () => {
+  if (!result.value) return;
+  
+  const csvContent = extractCsvContent(result.value);
+  if (!csvContent) {
+    error.value = 'No valid CSV content found between <csv> tags';
+    return;
+  }
+
+  try {
+    const blob = new Blob([csvContent], { 
+      type: 'text/csv;charset=utf-8;'
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bill-info-${new Date().toISOString()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    error.value = 'Failed to download CSV file';
+  }
+}
+
+// Add new function to convert CSV to Excel
+const csvToExcel = (csvContent: string): Uint8Array => {
+  // Split CSV into rows
+  const rows = csvContent.split('\n').map(row => row.split(','))
+  
+  // Create workbook and worksheet
+  const wb = XLSX.utils.book_new()
+  const ws = XLSX.utils.aoa_to_sheet(rows)
+  
+  // Add worksheet to workbook
+  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
+  
+  // Generate Excel file
+  return XLSX.write(wb, { type: 'array', bookType: 'xlsx' })
+}
+
+// Add download Excel function
+const downloadExcel = () => {
+  if (!result.value) return;
+  
+  const csvContent = extractCsvContent(result.value);
+  if (!csvContent) {
+    error.value = 'No valid CSV content found between <csv> tags';
+    return;
+  }
+
+  try {
+    const excelBuffer = csvToExcel(csvContent);
+    const blob = new Blob([excelBuffer], { 
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bill-info-${new Date().toISOString()}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    error.value = 'Failed to download Excel file';
   }
 }
 </script>
