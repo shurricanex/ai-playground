@@ -970,7 +970,7 @@ const jsonToExcel = (jsonData: string): Uint8Array => {
     // Add main row with general information
     const mainRow = [
       data.bl_number,
-      data.total_cartons.toString(),
+      data.total_cartons?.toString(),
       data.hts_code,
       data.place_of_delivery,
       data.port_of_discharge,
@@ -978,7 +978,7 @@ const jsonToExcel = (jsonData: string): Uint8Array => {
       data.freight_payment_type,
       data.service_contract_number,
       data.shipped_on_board_date,
-      data.freight_charge_total.toString(),
+      data.freight_charge_total?.toString(),
       data.freight_charge_currency,
       data.total_measurement.toString(),
       data.total_shipment_weight.toString(),
