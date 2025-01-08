@@ -183,7 +183,7 @@
             <!-- API Configuration -->
             <div class="mb-4">
               <div class="flex items-center justify-between mb-2">
-                <label class="text-sm font-medium text-gray-700">API Configuration</label>
+                <label class="text-sm font-medium text-gray-700">Model Selection</label>
                 <button
                   @click="showConfig = true"
                   class="text-gray-500 hover:text-gray-700 transition-colors"
@@ -192,7 +192,29 @@
                   <Cog6ToothIcon class="h-5 w-5" />
                 </button>
               </div>
-              <div class="text-xs text-gray-500">
+              
+              <!-- Model Selector -->
+              <div class="space-y-2">
+                <select
+                  v-model="selectedModel"
+                  @change="(e) => handleModelChange((e.target as HTMLSelectElement).value)"
+                  class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option v-for="model in AVAILABLE_MODELS" :key="model.id" :value="model.id">
+                    {{ model.name }}
+                  </option>
+                </select>
+                <p class="text-xs text-gray-500">
+                  {{ currentModel?.description }}
+                </p>
+              </div>
+
+              <!-- API Key Configuration -->
+              <div v-if="needsApiKey" class="mt-2 text-xs text-red-500">
+                API key required for {{ currentModel?.name }}
+              </div>
+              
+              <div class="mt-2 text-xs text-gray-500">
                 Temperature: {{ apiConfig.temperature }}, Top P: {{ apiConfig.top_p }}
               </div>
             </div>
@@ -363,6 +385,59 @@
         </div>
       </div>
     </div>
+
+    <!-- API Key Modal -->
+    <div v-if="showKeyInput" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-xl shadow-lg max-w-lg w-full p-4 sm:p-6">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-lg font-semibold text-gray-900">Configure API Key</h3>
+          <button @click="showKeyInput = false" class="text-gray-500 hover:text-gray-700">
+            <XMarkIcon class="h-5 w-5" />
+          </button>
+        </div>
+        
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-700 mb-2">
+            {{ currentModel?.provider === 'google' ? 'Upload Service Account JSON' : `Enter API Key for ${currentModel?.name}` }}
+          </label>
+          <input
+            v-if="apiKeyInputType === 'password'"
+            v-model="tempApiKey"
+            type="password"
+            class="w-full p-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            placeholder="Enter your API key"
+          />
+          <input
+            v-else
+            type="file"
+            accept="application/json"
+            class="w-full p-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            @change="(e) => tempApiKey = (e.target as HTMLInputElement).value"
+          />
+          <p class="mt-2 text-xs text-gray-500">
+            {{ currentModel?.provider === 'google' 
+              ? 'Upload your Google Cloud service account JSON file' 
+              : 'Your API key will be stored securely in your browser\'s local storage.' }}
+          </p>
+        </div>
+
+        <div class="flex justify-end space-x-3">
+          <button
+            @click="showKeyInput = false"
+            class="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900"
+          >
+            Cancel
+          </button>
+          <button
+            @click="saveApiKey"
+            class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+            :disabled="!tempApiKey"
+          >
+            Save {{ currentModel?.provider === 'google' ? 'Service Account' : 'API Key' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </Teleport>
 </template>
 
@@ -432,57 +507,125 @@ interface BillInfo {
   total_shipment_weight: number;
 }
 
+interface ModelConfig {
+  id: string;
+  name: string;
+  provider: 'deepseek' | 'google' | 'anthropic';
+  requiresKey?: boolean;
+  apiEndpoint?: string;
+  description: string;
+}
+
+const AVAILABLE_MODELS: ModelConfig[] = [
+  {
+    id: 'deepseek-chat',
+    name: 'deepseek-chat(V3)',
+    provider: 'deepseek',
+    apiEndpoint: 'https://api.deepseek.com/chat/completions',
+    description: 'DeepSeek\'s general-purpose chat model'
+  },
+  {
+    id: 'gemini-2.0-flash-exp',
+    name: 'gemini-2.0-flash-exp',
+    provider: 'google',
+    requiresKey: false,
+    description: 'Google\'s fastest and most capable model for document processing'
+  }
+]
+
 const DEFAULT_CONFIG = {
+  model: 'gemini-2.0-flash-exp',
   temperature: 0,
   top_p: 1,
-  max_tokens: null,
-  presence_penalty: null,
-  frequency_penalty: null}
+  max_tokens: 4000
+}
 
 const STORAGE_KEYS = {
   SYSTEM_PROMPT: 'bill-extractor-system-prompt',
   USER_PROMPT: 'bill-extractor-user-prompt',
   API_CONFIG: 'bill-extractor-api-config',
-  PDF_FILE: 'bill-extractor-pdf-file'
+  PDF_FILE: 'bill-extractor-pdf-file',
+  MODEL_KEYS: 'bill-extractor-model-keys'
 }
 
 const DEFAULT_PROMPTS = {
-  SYSTEM: `You are an advanced document reasoning assistant. Your task is to extract and analyze data from complex tables accurately, even when they contain blank spaces, ambiguous formatting, or overlapping information. Focus on correctly associating values with their respective columns.
+  SYSTEM: `You are an advanced document reasoning assistant. Your task is to extract and analyze data from complex tables accurately and reasoning step by step, even when they contain blank spaces, ambiguous formatting, or overlapping information. Focus on correctly associating values with their respective columns.
 
 Here is a table with freight information. Each row belongs to a shipment, and the columns are PREPAID (amount prepaid by the sender) and COLLECT (amount to be collected from the receiver). If a cell under a column is blank, it means the value does not exist for that column for that shipment.
 
-Table Example:
+Table Example 1:
 
-ITEM 	                          PREPAID	             COLLECT
-LUMSUM                                               USD 50.00
-OCEAN FREIGHT                                        USD 75.00
-LTHC                            VND 30.00
-DOC O/B DOC FEE                 VND 60.00
+ITEM 	                         PREPAID	       COLLECT
+LUMSUM                        USD 50.00
+OCEAN FREIGHT                                         USD 75.00
+LTHC                               VND 30.00
+DOC O/B DOC FEE                                       VND 60.00
 
-result :
+result of example 1 :
 [
  { "ITEM": "LUMSUM", "PREPAID": null, "COLLECT": "50.00", "CURRENCY": "USD" },
- { "ITEM": "OCEAN FREIGHT", "PREPAID": null, "COLLECT": "75.00",  "CURRENCY": "USD"},
+ { "ITEM": "OCEAN FREIGHT", "PREPAID": null, "COLLECT": "75.00", "CURRENCY": "USD"},
  { "ITEM": "LTHC", "PREPAID": "30.00", "COLLECT": null, "CURRENCY": "VND"},
  { "ITE ID": "DOC O/B DOC FEE", "PREPAID": "60.00", "COLLECT": null, "CURRENCY":"VND"}
 ]
 
+Table Example 2: 
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+|Freight & Charge    |  Rate                 |  Unit                         |  Currency                  | Prepaid                    | Collect                    |
+|item name 1           |            999.00   | Per Container         |  USD                          |                                   |             1011.00     | 
+|item name 2           |           222.00    | Per Document Fee |  CNY                         |                   335.00    |                                 |
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+result of example 2:
+[
+ { "ITEM": "item name 1", "PREPAID": null, "COLLECT":  "1011.00", "CURRENCY": "USD" },
+ { "ITEM": "item name 2", "PREPAID": "335.00", "COLLECT":  null, "CURRENCY": "CNY"},
+]
+
+Table Example 3: 
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+|     FREIGHT & CHARGES     |          BASIS                  |         RATE                   |          PREPAID                    |      COLLECT        |
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+|   Item 1                                  |         1                            | USD           2,992.00   |                                              | USD      2,992.00 |
+|   Item 2                                  |         1                            | CNY             340.00    |  CNY                 340,00       |                               |
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+result of example 3:
+[
+ { "ITEM": "item 1", "PREPAID": null, "COLLECT": "2,992.00", "CURRENCY": "USD" },
+ { "ITEM": "item 2", "PREPAID": "340.00", "COLLECT": null, "CURRENCY": "CNY"},
+]
+
+Table of example 4:
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+|CODE   TARIFF ITEM           |       FREIGHTED AS                 |       RATE           |           PREPAID           |               COLLECT      |
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+|ITEM 1                                  |  1/400HQ                                 |   1173.00           |                                      | USD        1173.00      |
+|ITEM 2                                  |  2.000                                       |    120.00            | CNY  240.00               |                                      |
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+result of example 4:
+[
+ { "ITEM": "ITEM 1", "PREPAID": null, "COLLECT": "1173.00", "CURRENCY": "USD" },
+ { "ITEM": "ITEM 2", "PREPAID": "240.00", "COLLECT": null, "CURRENCY": "CNY"},
+]
+
+
 Instructions:
-1.	Convert tabular data line items into markdown fill the blank cell with null  and display 
+1.	Convert tabular data line items into markdown fill the blank cell with null and display 
 2.	Avoid Confusion: Do not misinterpret blank cells. Always associate each value with its correct column and do not mix up columns, even if there is an unusual pattern of blanks.
-3.	Output Format: Provide the extracted as  data as schema below
+3.	Output Format: Provide the extracted as data as schema below
 {"ITEM": null, "PREPAID": null;, "COLLECT":null, "CURRENCY":null }
-4.	Validation: 
-       validation1: Cross-check each value with its respective column to ensure accuracy, especially for rows with blank spaces
-	validation2: also make sure either PREPAID or COLLECT has value
-       validation3: ensure strictly that not all PREPAID cells are null, and also not all COLLECT cells are null, that mean the PREPAID and COLLECT column must not be entirely null, if this fails then it mean you have mixed up column value 
-5. find the freight payment type which can be COLLECT or PREPAID, then use it to filter the results, for example the freight payment type is COLLECT then filter to include object which COLLECT is not null
-6. map the result into {"item", null, "amount": null, "currency":null}
-7. push the mapped results into freight_rate_item then extract other field values as follow schema 
+4.	Validation: 
+    validation1: Cross-check each value with its respective column to ensure accuracy, especially for rows with blank spaces.
+	validation2: also make sure either PREPAID or COLLECT has value.
+    validation3: ensure strictly that not all PREPAID cells are null, and also not all COLLECT cells are null, that mean the PREPAID and COLLECT column must not be entirely null, if this fails then it mean you have mixed up column value .
+5. find the freight payment type which can be COLLECT or PREPAID, then use it to filter the results, for example the freight payment type is COLLECT then filter to include object which COLLECT is not null.
+6. map the result into {"item", null, "amount": null, "currency":null}.
+7.  extract other field values as follow schema and add the previous filtered and mapped results as freight_rate_item property in this schema.
 JSON schema:
 {
- "bl_number": null,
- "total_cartons": 0,
+ "bl_number": null,
+ "total_cartons": 0,
 "container_detail":[{
 "container_number": null,
 "container_seal_number": null,
@@ -490,29 +633,19 @@ JSON schema:
 "carton_amount":0,
 }
 ]
- "hts_code": null,
- "is_port_of_arrival_door": false,
- "place_of_delivery": null,
- "port_of_discharge": null,
- "port_of_loading": null,
- "freight_payment_type": null,
- "freight_rate_item": [
- {
- "item_name": null,
-"amount":null,
-"currency":null
- }
- ]
-,
- "service_contract_number": null,
- "shipped_on_board_date": null,
- "freight_charge_total": 0,
- "freight_charge_currency": "",
- "total_measurement": 0,
- "total_shipment_weight": 0
+ "hts_code": null,
+ "is_port_of_arrival_door": false,
+ "place_of_delivery": null,
+ "port_of_discharge": null,
+ "port_of_loading": null,
+ "freight_payment_type": null,
+ "service_contract_number": null,
+ "shipped_on_board_date": null,
+ "freight_charge_total": 0,
+ "freight_charge_currency": "",
+ "total_measurement": 0,
+ "total_shipment_weight": 0
 }
-8. Reasoning step by step, if you have struggle please explain and suggest the changes
-
 `, // Your long default user prompt
 USER: `Please extract the information from the freight charge table in the document provided`
 }
@@ -558,16 +691,28 @@ const MIN_ZOOM = 0.5
 const MAX_ZOOM = 3
 const displayMode = ref<'json' | 'markdown'>('json')
 const extractionDuration = ref<number | null>(null)
+const selectedModel = ref<string>(DEFAULT_CONFIG.model)
+const modelKeys = ref<Record<string, string>>({})
+const showKeyInput = ref(false)
+const tempApiKey = ref('')
+const selectedProvider = ref<string>('')
 
 const VuePdfEmbed = defineAsyncComponent(() => 
   import('vue-pdf-embed')
 )
 
 const configPlaceholder = computed(() => {
-  return `// Sample Configurations:
+  const model = currentModel.value
+  if (!model) return ''
+
+  let examples = ''
+  
+  if (model.provider === 'deepseek') {
+    examples = `// Sample Configurations:
 
 // 1. More Creative Output
 {
+  "model": "${selectedModel.value}",
   "temperature": 0.8,
   "top_p": 0.9,
   "__comments": {
@@ -577,6 +722,7 @@ const configPlaceholder = computed(() => {
 
 // 2. More Precise Output
 {
+  "model": "${selectedModel.value}",
   "temperature": 0.3,
   "top_p": 0.5,
   "__comments": {
@@ -586,15 +732,57 @@ const configPlaceholder = computed(() => {
 
 // 3. Longer Output
 {
+  "model": "${selectedModel.value}",
   "temperature": 0.7,
   "max_tokens": 8000,
   "__comments": {
     "description": "Increased token limit for longer responses"
   }
+}`
+  } else if (model.provider === 'google') {
+    examples = `// Sample Configurations:
+
+// 1. Standard Output
+{
+  "model": "${selectedModel.value}",
+  "temperature": 0.4,
+  "candidateCount": 1,
+  "__comments": {
+    "description": "Balanced between creativity and precision"
+  }
 }
 
+// 2. More Precise Output
+{
+  "model": "${selectedModel.value}",
+  "temperature": 0.1,
+  "topK": 1,
+  "topP": 0.8,
+  "__comments": {
+    "description": "More focused and deterministic outputs"
+  }
+}
+
+// 3. Safety Settings
+{
+  "model": "${selectedModel.value}",
+  "temperature": 0.4,
+  "safetySettings": [
+    {
+      "category": "HARM_CATEGORY_HARASSMENT",
+      "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+    }
+  ],
+  "__comments": {
+    "description": "With additional safety controls"
+  }
+}`
+  }
+
+  return `${examples}
+
 // Default Configuration:
-${JSON.stringify(DEFAULT_CONFIG, null, 2)}`
+${JSON.stringify({ ...DEFAULT_CONFIG, model: selectedModel.value }, null, 2)}`
 })
 
 const formattedResult = computed(() => {
@@ -734,7 +922,12 @@ const handleFileDrop = (event: DragEvent) => {
 }
 
 const submitForm = async () => {
-  if (!selectedFile.value) return
+  if (!selectedFile.value || !currentModel.value) return
+  if (needsApiKey.value && currentModel.value.provider !== 'google') {
+    error.value = 'Please configure API key first'
+    showKeyInput.value = true
+    return
+  }
 
   loading.value = true
   error.value = ''
@@ -747,6 +940,13 @@ const submitForm = async () => {
     formData.append('file', selectedFile.value)
     formData.append('systemPrompt', systemPrompt.value)
     formData.append('userPrompt', userPrompt.value)
+    formData.append('model', selectedModel.value)
+    formData.append('provider', currentModel.value.provider)
+    
+    // Only append API key for providers that need it (not Google)
+    if (currentModel.value.requiresKey && currentModel.value.provider !== 'google') {
+      formData.append('apiKey', modelKeys.value[currentModel.value.provider])
+    }
 
     const cleanConfig = Object.entries(apiConfig.value)
       .reduce<Record<string, any>>((acc, [key, value]) => {
@@ -769,7 +969,7 @@ const submitForm = async () => {
 
     const data = await response.json()
     result.value = data.result
-    extractionDuration.value = (performance.now() - startTime) / 1000 // Convert to seconds
+    extractionDuration.value = (performance.now() - startTime) / 1000
   } catch (err: any) {
     error.value = err?.message || 'An error occurred'
   } finally {
@@ -899,6 +1099,16 @@ onMounted(() => {
       localStorage.removeItem(STORAGE_KEYS.PDF_FILE);
     } catch {
       // Ignore errors
+    }
+  }
+
+  // Load saved model keys
+  const savedModelKeys = getItem(STORAGE_KEYS.MODEL_KEYS)
+  if (savedModelKeys) {
+    try {
+      modelKeys.value = JSON.parse(savedModelKeys)
+    } catch {
+      modelKeys.value = {}
     }
   }
 })
@@ -1064,6 +1274,71 @@ const downloadExcel = () => {
   } catch (err) {
     error.value = 'Failed to download Excel file'
   }
+}
+
+const currentModel = computed(() => 
+  AVAILABLE_MODELS.find(model => model.id === selectedModel.value)
+)
+
+const needsApiKey = computed(() => 
+  currentModel.value?.requiresKey && 
+  currentModel.value.provider !== 'google' && 
+  !modelKeys.value[currentModel.value.provider]
+)
+
+const handleModelChange = (modelId: string) => {
+  const model = AVAILABLE_MODELS.find(m => m.id === modelId)
+  if (!model) return
+  
+  selectedModel.value = modelId
+  selectedProvider.value = model.provider
+  
+  // Update both apiConfig and configText with the new model
+  const newConfig = {
+    ...apiConfig.value,
+    model: modelId
+  }
+  apiConfig.value = newConfig
+  configText.value = JSON.stringify(newConfig, null, 2)
+  
+  // Only show API key modal for non-Google providers that require a key
+  if (model.requiresKey && model.provider !== 'google' && !modelKeys.value[model.provider]) {
+    showKeyInput.value = true
+  }
+}
+
+const apiKeyInputType = computed(() => 
+  currentModel.value?.provider === 'google' ? 'file' : 'password'
+)
+
+const saveApiKey = async () => {
+  if (!selectedProvider.value || !tempApiKey.value) return
+  
+  let finalKey = tempApiKey.value
+  
+  // If it's Google provider, read the JSON file
+  if (selectedProvider.value === 'google' && apiKeyInputType.value === 'file') {
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    if (!fileInput?.files?.length) return
+    
+    try {
+      const file = fileInput.files[0]
+      const text = await file.text()
+      finalKey = text // Store the entire service account JSON
+    } catch (err) {
+      error.value = 'Failed to read service account JSON file'
+      return
+    }
+  }
+  
+  modelKeys.value = {
+    ...modelKeys.value,
+    [selectedProvider.value]: finalKey
+  }
+  
+  setItem(STORAGE_KEYS.MODEL_KEYS, JSON.stringify(modelKeys.value))
+  showKeyInput.value = false
+  tempApiKey.value = ''
 }
 </script>
 
