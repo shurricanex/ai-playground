@@ -55,7 +55,7 @@ export default defineEventHandler(async (event) => {
       messages,
       ...configData  // Merge the custom config
     }
-    console.log(payload)
+
     // Make API request
     const response = await axios.post(apiUrl, payload, { headers })
     
