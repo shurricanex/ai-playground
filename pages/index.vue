@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen bg-gray-50 py-4 sm:py-8">
     <div class="max-w-[1500px] mx-auto px-4 sm:px-6 lg:px-8">
-      <h1 class="text-2xl sm:text-3xl font-bold text-gray-900 mb-6 sm:mb-8">PDF Bill Information Extractor</h1>
+      <h1 class="text-2xl sm:text-3xl font-bold text-gray-900 mb-6 sm:mb-8">Document Data Extractor</h1>
       
       <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6">
         <!-- Left Column: Input Section -->
@@ -525,6 +525,13 @@ const AVAILABLE_MODELS: ModelConfig[] = [
     description: 'DeepSeek\'s general-purpose chat model'
   },
   {
+    id: 'deepseek-reasoner',
+    name: 'DeepSeek R1',
+    provider: 'deepseek',
+    apiEndpoint: 'https://api.deepseek.com/chat/completions',
+    description: 'DeepSeek\'s specialized model for document reasoning and extraction'
+  },
+  {
     id: 'gemini-2.0-flash-exp',
     name: 'gemini-2.0-flash-exp',
     provider: 'google',
@@ -540,134 +547,10 @@ const DEFAULT_CONFIG = {
   max_tokens: 4000
 }
 
-const STORAGE_KEYS = {
-  SYSTEM_PROMPT: 'bill-extractor-system-prompt',
-  USER_PROMPT: 'bill-extractor-user-prompt',
-  API_CONFIG: 'bill-extractor-api-config',
-  PDF_FILE: 'bill-extractor-pdf-file',
-  MODEL_KEYS: 'bill-extractor-model-keys'
-}
-
 const DEFAULT_PROMPTS = {
-  SYSTEM: `You are an advanced document reasoning assistant. Your task is to extract and analyze data from complex tables accurately and reasoning step by step, even when they contain blank spaces, ambiguous formatting, or overlapping information. Focus on correctly associating values with their respective columns.
-
-Here is a table with freight information. Each row belongs to a shipment, and the columns are PREPAID (amount prepaid by the sender) and COLLECT (amount to be collected from the receiver). If a cell under a column is blank, it means the value does not exist for that column for that shipment.
-
-Table Example 1:
-
-ITEM 	                         PREPAID	       COLLECT
-LUMSUM                        USD 50.00
-OCEAN FREIGHT                                         USD 75.00
-LTHC                               VND 30.00
-DOC O/B DOC FEE                                       VND 60.00
-
-result of example 1 :
-[
- { "ITEM": "LUMSUM", "PREPAID": null, "COLLECT": "50.00", "CURRENCY": "USD" },
- { "ITEM": "OCEAN FREIGHT", "PREPAID": null, "COLLECT": "75.00", "CURRENCY": "USD"},
- { "ITEM": "LTHC", "PREPAID": "30.00", "COLLECT": null, "CURRENCY": "VND"},
- { "ITE ID": "DOC O/B DOC FEE", "PREPAID": "60.00", "COLLECT": null, "CURRENCY":"VND"}
-]
-
-Table Example 2: 
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-|Freight & Charge    |  Rate                 |  Unit                         |  Currency                  | Prepaid                    | Collect                    |
-|item name 1           |            999.00   | Per Container         |  USD                          |                                   |             1011.00     | 
-|item name 2           |           222.00    | Per Document Fee |  CNY                         |                   335.00    |                                 |
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-result of example 2:
-[
- { "ITEM": "item name 1", "PREPAID": null, "COLLECT":  "1011.00", "CURRENCY": "USD" },
- { "ITEM": "item name 2", "PREPAID": "335.00", "COLLECT":  null, "CURRENCY": "CNY"},
-]
-
-Table Example 3: 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-|     FREIGHT & CHARGES     |          BASIS                  |         RATE                   |          PREPAID                    |      COLLECT        |
--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-|   Item 1                                  |         1                            | USD           2,992.00   |                                              | USD      2,992.00 |
-|   Item 2                                  |         1                            | CNY             340.00    |  CNY                 340,00       |                               |
--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-result of example 3:
-[
- { "ITEM": "item 1", "PREPAID": null, "COLLECT": "2,992.00", "CURRENCY": "USD" },
- { "ITEM": "item 2", "PREPAID": "340.00", "COLLECT": null, "CURRENCY": "CNY"},
-]
-
-Table of example 4:
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-|CODE   TARIFF ITEM           |       FREIGHTED AS                 |       RATE           |           PREPAID           |               COLLECT      |
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-|ITEM 1                                  |  1/400HQ                                 |   1173.00           |                                      | USD        1173.00      |
-|ITEM 2                                  |  2.000                                       |    120.00            | CNY  240.00               |                                      |
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-result of example 4:
-[
- { "ITEM": "ITEM 1", "PREPAID": null, "COLLECT": "1173.00", "CURRENCY": "USD" },
- { "ITEM": "ITEM 2", "PREPAID": "240.00", "COLLECT": null, "CURRENCY": "CNY"},
-]
-
-
-Instructions:
-1.	Convert tabular data line items into markdown fill the blank cell with null and display 
-2.	Avoid Confusion: Do not misinterpret blank cells. Always associate each value with its correct column and do not mix up columns, even if there is an unusual pattern of blanks.
-3.	Output Format: Provide the extracted as data as schema below
-{"ITEM": null, "PREPAID": null;, "COLLECT":null, "CURRENCY":null }
-4.	Validation: 
-    validation1: Cross-check each value with its respective column to ensure accuracy, especially for rows with blank spaces.
-	validation2: also make sure either PREPAID or COLLECT has value.
-    validation3: ensure strictly that not all PREPAID cells are null, and also not all COLLECT cells are null, that mean the PREPAID and COLLECT column must not be entirely null, if this fails then it mean you have mixed up column value .
-5. find the freight payment type which can be COLLECT or PREPAID, then use it to filter the results, for example the freight payment type is COLLECT then filter to include object which COLLECT is not null.
-6. map the result into {"item", null, "amount": null, "currency":null}.
-7.  extract other field values as follow schema and add the previous filtered and mapped results as freight_rate_item property in this schema.
-JSON schema:
-{
- "bl_number": null,
- "total_cartons": 0,
-"container_detail":[{
-"container_number": null,
-"container_seal_number": null,
-"container_size_type": null,
-"carton_amount":0,
+  SYSTEM: '',
+  USER: ''
 }
-]
- "hts_code": null,
- "is_port_of_arrival_door": false,
- "place_of_delivery": null,
- "port_of_discharge": null,
- "port_of_loading": null,
- "freight_payment_type": null,
- "service_contract_number": null,
- "shipped_on_board_date": null,
- "freight_charge_total": 0,
- "freight_charge_currency": "",
- "total_measurement": 0,
- "total_shipment_weight": 0
-}
-`, // Your long default user prompt
-USER: `Please extract the information from the freight charge table in the document provided`
-}
-
-const useLocalStorage = () => {
-  const getItem = (key: string, defaultValue: any = null) => {
-    if (process.client) {
-      return localStorage.getItem(key) ?? defaultValue
-    }
-    return defaultValue
-  }
-
-  const setItem = (key: string, value: string) => {
-    if (process.client) {
-      localStorage.setItem(key, value)
-    }
-  }
-
-  return { getItem, setItem }
-}
-
-const { getItem, setItem } = useLocalStorage()
 
 const fileInput = ref(null)
 const selectedFile = ref<File | null>(null)
@@ -869,20 +752,7 @@ const handleFileChange = (event: Event) => {
       URL.revokeObjectURL(pdfUrl.value);
     }
     
-    const fileUrl = URL.createObjectURL(file);
-    pdfUrl.value = fileUrl;
-    
-    // Save file metadata to localStorage
-    const fileMetadata: PDFFileMetadata = {
-      name: file.name,
-      size: file.size,
-      lastModified: file.lastModified,
-      type: file.type
-    };
-    
-    if (process.client) {
-      setItem(STORAGE_KEYS.PDF_FILE, JSON.stringify(fileMetadata));
-    }
+    pdfUrl.value = URL.createObjectURL(file);
   } else {
     error.value = 'Please select a PDF file';
   }
@@ -901,21 +771,7 @@ const handleFileDrop = (event: DragEvent) => {
       URL.revokeObjectURL(pdfUrl.value);
     }
     
-    const fileUrl = URL.createObjectURL(file);
-    pdfUrl.value = fileUrl;
-    
-    // Save file metadata to localStorage
-    const fileMetadata: PDFFileMetadata = {
-      name: file.name,
-      size: file.size,
-      lastModified: file.lastModified,
-      type: file.type,
-      url: fileUrl
-    };
-    
-    if (process.client) {
-      setItem(STORAGE_KEYS.PDF_FILE, JSON.stringify(fileMetadata));
-    }
+    pdfUrl.value = URL.createObjectURL(file);
   } else {
     error.value = 'Please drop a PDF file';
   }
@@ -1009,7 +865,6 @@ const resetConfig = () => {
   apiConfig.value = { ...DEFAULT_CONFIG }
   configText.value = JSON.stringify(DEFAULT_CONFIG, null, 2)
   configError.value = ''
-  setItem(STORAGE_KEYS.API_CONFIG, JSON.stringify(DEFAULT_CONFIG))
 }
 
 const saveConfig = () => {
@@ -1029,13 +884,8 @@ const togglePdfView = () => {
 }
 
 const resetPrompts = () => {
-  const confirmReset = window.confirm('Are you sure you want to reset prompts to default values?')
-  if (confirmReset) {
-    systemPrompt.value = DEFAULT_PROMPTS.SYSTEM
-    userPrompt.value = DEFAULT_PROMPTS.USER
-    setItem(STORAGE_KEYS.SYSTEM_PROMPT, DEFAULT_PROMPTS.SYSTEM)
-    setItem(STORAGE_KEYS.USER_PROMPT, DEFAULT_PROMPTS.USER)
-  }
+  systemPrompt.value = DEFAULT_PROMPTS.SYSTEM
+  userPrompt.value = DEFAULT_PROMPTS.USER
 }
 
 const zoomIn = () => {
@@ -1054,63 +904,12 @@ const resetZoom = () => {
   zoomLevel.value = 1
 }
 
-watch(systemPrompt, (newValue) => {
-  setItem(STORAGE_KEYS.SYSTEM_PROMPT, newValue)
-}, { deep: true })
-
-watch(userPrompt, (newValue) => {
-  setItem(STORAGE_KEYS.USER_PROMPT, newValue)
-}, { deep: true })
-
-watch(apiConfig, (newValue) => {
-  setItem(STORAGE_KEYS.API_CONFIG, JSON.stringify(newValue))
-}, { deep: true })
-
 onMounted(() => {
-  // Initialize config from localStorage
-  const savedConfig = getItem(STORAGE_KEYS.API_CONFIG)
-  if (savedConfig) {
-    try {
-      const parsed = JSON.parse(savedConfig)
-      apiConfig.value = parsed
-      configText.value = JSON.stringify(parsed, null, 2)
-    } catch {
-      apiConfig.value = DEFAULT_CONFIG
-      configText.value = JSON.stringify(DEFAULT_CONFIG, null, 2)
-    }
-  }
-
-  // Initialize prompts from localStorage
-  const savedSystemPrompt = getItem(STORAGE_KEYS.SYSTEM_PROMPT)
-  const savedUserPrompt = getItem(STORAGE_KEYS.USER_PROMPT)
-  
-  if (savedSystemPrompt) {
-    systemPrompt.value = savedSystemPrompt
-  }
-  if (savedUserPrompt) {
-    userPrompt.value = savedUserPrompt
-  }
-
-  // Remove PDF restoration from localStorage since we can't restore the actual file
-  const savedFile = getItem(STORAGE_KEYS.PDF_FILE);
-  if (savedFile) {
-    try {
-      // Just clear the saved file data since we can't restore the actual file
-      localStorage.removeItem(STORAGE_KEYS.PDF_FILE);
-    } catch {
-      // Ignore errors
-    }
-  }
-
-  // Load saved model keys
-  const savedModelKeys = getItem(STORAGE_KEYS.MODEL_KEYS)
-  if (savedModelKeys) {
-    try {
-      modelKeys.value = JSON.parse(savedModelKeys)
-    } catch {
-      modelKeys.value = {}
-    }
-  }
+  // Initialize with default values
+  apiConfig.value = DEFAULT_CONFIG
+  configText.value = JSON.stringify(DEFAULT_CONFIG, null, 2)
+  systemPrompt.value = DEFAULT_PROMPTS.SYSTEM
+  userPrompt.value = DEFAULT_PROMPTS.USER
 })
 
 onUnmounted(() => {
@@ -1122,13 +921,10 @@ onUnmounted(() => {
 // Add cleanup function for file URL
 const cleanupFileUrl = () => {
   if (pdfUrl.value) {
-    URL.revokeObjectURL(pdfUrl.value);
-    pdfUrl.value = null;
+    URL.revokeObjectURL(pdfUrl.value)
+    pdfUrl.value = null
   }
-  selectedFile.value = null;
-  if (process.client) {
-    localStorage.removeItem(STORAGE_KEYS.PDF_FILE);
-  }
+  selectedFile.value = null
 }
 
 // Add function to extract JSON from result text
@@ -1316,27 +1112,20 @@ const saveApiKey = async () => {
   
   let finalKey = tempApiKey.value
   
-  // If it's Google provider, read the JSON file
   if (selectedProvider.value === 'google' && apiKeyInputType.value === 'file') {
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
     if (!fileInput?.files?.length) return
     
     try {
       const file = fileInput.files[0]
-      const text = await file.text()
-      finalKey = text // Store the entire service account JSON
+      finalKey = await file.text()
     } catch (err) {
       error.value = 'Failed to read service account JSON file'
       return
     }
   }
   
-  modelKeys.value = {
-    ...modelKeys.value,
-    [selectedProvider.value]: finalKey
-  }
-  
-  setItem(STORAGE_KEYS.MODEL_KEYS, JSON.stringify(modelKeys.value))
+  modelKeys.value[selectedProvider.value] = finalKey
   showKeyInput.value = false
   tempApiKey.value = ''
 }

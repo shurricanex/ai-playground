@@ -98,7 +98,7 @@ const deepseekProvider: ModelProvider = {
     ]
 
     const payload = {
-      model: "deepseek-chat",
+      model: config.model || "deepseek-chat",
       messages,
       ...config
     }
