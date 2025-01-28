@@ -9,7 +9,9 @@ export default defineNuxtConfig({
     // Google Cloud configuration
     googleApplicationCredentials: process.env.GOOGLE_APPLICATION_CREDENTIALS,
     googleProjectId: process.env.GOOGLE_PROJECT_ID,
-    googleLocation: process.env.GOOGLE_LOCATION
+    googleLocation: process.env.GOOGLE_LOCATION,
+    googleBucketName: process.env.GOOGLE_BUCKET_NAME,
+    googleBucketPath: process.env.GOOGLE_BUCKET_PATH || 'pdf-uploads'
   },
   compatibilityDate: '2025-01-03'
 })

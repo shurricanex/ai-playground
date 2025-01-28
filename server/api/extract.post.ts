@@ -1,8 +1,10 @@
 import { defineEventHandler, readMultipartFormData, createError } from 'h3'
+import { useRuntimeConfig } from '#imports'
 import pdfParse from 'pdf-parse/lib/pdf-parse.js'
 import axios from 'axios'
 import { VertexAI } from '@google-cloud/vertexai'
 import { PredictionServiceClient } from '@google-cloud/aiplatform'
+import { Storage } from '@google-cloud/storage'
 import * as fs from 'fs'
 import * as path from 'path'
 
@@ -13,6 +15,7 @@ interface ModelProvider {
 // Initialize Vertex AI client once
 let vertexAI: VertexAI | null = null;
 let predictionClient: PredictionServiceClient | null = null;
+let storage: Storage | null = null;
 
 try {
   // Get credentials from environment variable
@@ -41,7 +44,14 @@ try {
       predictionClient = new PredictionServiceClient({
         credentials: parsedCredentials
       });
-      console.log('Successfully initialized Vertex AI client');
+
+      // Initialize Google Cloud Storage
+      storage = new Storage({
+        credentials: parsedCredentials,
+        projectId: parsedCredentials.project_id
+      });
+      
+      console.log('Successfully initialized Google Cloud clients');
     } catch (parseError) {
       console.error('Failed to parse Google credentials:', parseError);
     }
@@ -49,34 +59,44 @@ try {
     console.error('GOOGLE_APPLICATION_CREDENTIALS not found in environment variables');
   }
 } catch (error) {
-  console.error('Failed to initialize Vertex AI client:', error);
+  console.error('Failed to initialize Google Cloud clients:', error);
 }
-// try {
-//   // Check if GOOGLE_APPLICATION_CREDENTIALS is set and points to a valid file
-//   const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-//   if (credentialsPath && fs.existsSync(credentialsPath)) {
-//     // Read and parse the credentials file
-//     const credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
-//     console.log('credentials', credentials)
-//     // Initialize Vertex AI with project configuration
-//     vertexAI = new VertexAI({
-//       project: process.env.GOOGLE_PROJECT_ID || '',
-//       location: process.env.GOOGLE_LOCATION || 'us-central1'
-//     });
-    
-//     // Set GOOGLE_APPLICATION_CREDENTIALS environment variable
-//     process.env.GOOGLE_APPLICATION_CREDENTIALS = path.resolve(credentialsPath);
-    
-//     predictionClient = new PredictionServiceClient({
-//       credentials: credentials
-//     });
-//     console.log('Successfully initialized Vertex AI client');
-//   } else {
-//     console.error('GOOGLE_APPLICATION_CREDENTIALS not found or invalid:', credentialsPath);
-//   }
-// } catch (error) {
-//   console.error('Failed to initialize Vertex AI client:', error);
-// }
+
+// Function to upload file to GCS and get signed URL
+async function uploadToGCS(fileData: Buffer, fileName: string): Promise<string> {
+  if (!storage) {
+    throw new Error('Google Cloud Storage not initialized');
+  }
+
+  const config = useRuntimeConfig();
+  const bucketName = config.googleBucketName;
+  const bucketPath = config.googleBucketPath;
+
+  if (!bucketName) {
+    throw new Error('Google Cloud Storage bucket name not configured');
+  }
+
+  const bucket = storage.bucket(bucketName);
+  const blobPath = `${bucketPath}/${fileName}`;
+  const blob = bucket.file(blobPath);
+
+  // Upload the file
+  await blob.save(fileData, {
+    contentType: 'application/pdf',
+    metadata: {
+      cacheControl: 'public, max-age=31536000',
+    },
+  });
+
+  // Get the signed URL that expires in 1 hour
+  const [url] = await blob.getSignedUrl({
+    version: 'v4',
+    action: 'read',
+    expires: Date.now() + 60 * 60 * 1000, // 1 hour
+  });
+
+  return `gs://${bucketName}/${blobPath}`;
+}
 
 const deepseekProvider: ModelProvider = {
   makeRequest: async (text: string, systemPrompt: string, userPrompt: string, apiKey: string, config: any) => {
@@ -120,16 +140,23 @@ const googleProvider: ModelProvider = {
       ...config
     });
 
-    // Create text parts for the request
+    // Create parts for the request
+    const filePart = {
+      fileData: {
+        fileUri: text, // This will be the GCS URL
+        mimeType: 'application/pdf',
+      },
+    };
+
     const textPart = {
-      text: `${systemPrompt || 'You are an AI assistant that helps extract information from documents.'}\n\n${userPrompt || 'Please extract information from this document:'}\n\n${text}`
+      text: `${systemPrompt || 'You are an AI assistant that helps extract information from documents.'}\n\n${userPrompt || 'Please extract information from this document:'}`
     };
 
     // Prepare the request
     const request = {
       contents: [{
         role: 'user',
-        parts: [textPart]
+        parts: [filePart, textPart]
       }]
     };
 
@@ -229,17 +256,25 @@ export default defineEventHandler(async (event) => {
       throw new Error('API key not configured')
     }
 
-    // Parse PDF content
-    const pdfData = await pdfParse(fileData.data)
-    const fileContent = pdfData.text
-
     // Get configuration
     const config = formData.find(item => item.name === 'config')?.data.toString('utf-8')
     const configData = config ? JSON.parse(config) : {}
 
+    let content: string;
+    if (provider === 'google') {
+      // For Google provider, upload to GCS and get URL
+      const fileName = `${Date.now()}-${fileData.filename}`;
+      const gcsUrl = await uploadToGCS(fileData.data, fileName);
+      content = gcsUrl;
+    } else {
+      // For other providers, parse PDF content
+      const pdfData = await pdfParse(fileData.data);
+      content = pdfData.text;
+    }
+
     // Make request using selected provider
     const result = await selectedProvider.makeRequest(
-      fileContent,
+      content,
       systemPrompt || '',
       userPrompt || '',
       finalApiKey,
